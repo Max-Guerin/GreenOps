@@ -588,6 +588,7 @@ ul { list-style: none; }
 .sched-job-chip.routine  { background: rgba(76,175,110,0.18); color: var(--p-routine);  border-left: 2px solid var(--p-routine); }
 .sched-job-chip.deferred { background: rgba(90,122,90,0.18);  color: var(--p-deferred); border-left: 2px solid var(--p-deferred); }
 .sched-job-chip.complete { background: rgba(76,175,110,0.08); color: var(--text3);      border-left: 2px solid var(--p-routine); text-decoration: line-through; }
+.sched-job-chip.skipped  { background: var(--bg3); color: var(--text3); border-left: 2px solid var(--border2); text-decoration: line-through; opacity: 0.6; }
 .sched-job-chip.overdue  { border-left: 2px solid var(--p-critical); }
 
 /* ── Monthly calendar grid ── */
@@ -825,6 +826,15 @@ ul { list-style: none; }
   #header .header-right { gap: 0.35rem; flex-shrink: 1; min-width: 0; }
   #header .date-display { display: none; }
   #header .user-badge { display: none; }
+  /* icon-only buttons need big glyphs + proper tap targets */
+  #header .btn-sm {
+    font-size: 1.15rem;
+    line-height: 1;
+    padding: 0.45rem 0.7rem;
+    min-height: 42px;
+    min-width: 42px;
+    justify-content: center;
+  }
   .hide-mobile { display: none; }
   .hide-mobile-inline { display: none; }
 
@@ -2394,6 +2404,85 @@ const Resources = {
    1. logs actual hours against the schedule (est vs actual tracking)
    2. adds machine hours to every matched machine in the register
    3. deducts assigned stock quantities from inventory              */
+/* ── Auto-Planner: the "don't make me think about it" engine ──
+   Jobs with autoSchedule on generate their own scheduled instances
+   ahead of time, pre-assigned to their default person. Idempotent:
+   safe to run on every launch, on any device — existing instances
+   (including skipped ones) are never duplicated or resurrected.   */
+const AutoScheduler = {
+  DOW: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],
+  // How far ahead each frequency generates
+  HORIZON: { daily: 14, weekly: 21, monthly: 92, annual: 370, interval: 92 },
+
+  run() {
+    const jobs = Jobs.getAll().filter(j => j.autoSchedule);
+    if (!jobs.length) return { added: 0 };
+    const existing = new Set(Jobs.getScheduled().map(s => s.jobId + '|' + s.date));
+    const today = new Date(); today.setHours(0,0,0,0);
+    let added = 0;
+
+    for (const job of jobs) {
+      for (const dateStr of this._datesFor(job, today)) {
+        const key = job.id + '|' + dateStr;
+        if (existing.has(key)) continue;        // already there — or skipped; never resurrect
+        let assignedTo = '', note = '';
+        if (job.defaultAssigneeId) {
+          const m = Staff.getById(job.defaultAssigneeId);
+          if (m && m.status !== 'inactive') {
+            if (Leave.isOnLeave(m.id, dateStr)) note = `${m.name} on leave — needs reassignment`;
+            else assignedTo = m.name;
+          }
+        }
+        Jobs.saveScheduled({
+          id: Jobs.newId(), jobId: job.id, date: dateStr,
+          status: 'pending', priority: job.priority || 'routine',
+          cutDirection: '', assignedTo, notes: note,
+          auto: true, created: Date.now(), createdBy: 'Auto-Planner'
+        });
+        existing.add(key); added++;
+      }
+    }
+    return { added };
+  },
+
+  _datesFor(job, today) {
+    const freq    = job.frequency;
+    const horizon = this.HORIZON[freq];
+    if (!horizon) return [];                    // adhoc jobs stay manual
+    const out = [];
+    for (let i = 0; i < horizon; i++) {
+      const d = new Date(today); d.setDate(today.getDate() + i);
+      if (this._matches(job, d)) out.push(Utils.dateStr(d));
+    }
+    return out;
+  },
+
+  _matches(job, d) {
+    const dow = this.DOW[d.getDay()];
+    switch (job.frequency) {
+      case 'daily':
+        return (job.recurDays && job.recurDays.length) ? job.recurDays.includes(dow) : true;
+      case 'weekly':
+        return (job.recurDays && job.recurDays.length ? job.recurDays : ['Mon']).includes(dow);
+      case 'monthly': {
+        const want = parseInt(job.recurDayOfMonth) || 1;
+        const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        return d.getDate() === Math.min(want, last);   // "31st" still fires in short months
+      }
+      case 'annual':
+        return (d.getMonth() + 1) === (parseInt(job.recurMonth) || 1) &&
+               d.getDate() === (parseInt(job.recurDay) || 1);
+      case 'interval': {
+        const n = parseInt(job.intervalWeeks) || 4;
+        const anchor = new Date((job.intervalAnchor || Utils.dateStr(new Date())) + 'T00:00:00');
+        const days = Math.round((d - anchor) / 86400000);
+        return days >= 0 && days % (n * 7) === 0;
+      }
+      default: return false;
+    }
+  }
+};
+
 const JobCompletion = {
   // Match job equipment names to register machines (exact name, then type)
   matchMachines(equipNames) {
@@ -2472,6 +2561,7 @@ const WhiteboardPage = {
     // Group today's jobs by assignee
     const groups = {};
     for (const s of todays) {
+      if (s.status === 'skipped') continue;     // "not needed today" stays off the board
       const key = s.assignedTo || 'Unassigned';
       (groups[key] = groups[key] || []).push(s);
     }
@@ -4037,7 +4127,7 @@ const Jobs = {
   getIncomplete() {
     const today = Utils.dateStr(new Date());
     return this.getScheduled().filter(s =>
-      s.status !== 'complete' && s.date < today
+      s.status !== 'complete' && s.status !== 'skipped' && s.date < today
     ).sort((a, b) => a.date.localeCompare(b.date));
   }
 };
@@ -4083,7 +4173,7 @@ const Utils = {
     return { critical:'Critical', high:'High', routine:'Routine', deferred:'Deferred' }[p] || p;
   },
   freqLabel(f) {
-    return { annual:'Annual', monthly:'Monthly', weekly:'Weekly', daily:'Daily', adhoc:'Ad Hoc' }[f] || f;
+    return { annual:'Annual', monthly:'Monthly', weekly:'Weekly', daily:'Daily', adhoc:'Ad Hoc', interval:'Every N Weeks' }[f] || f;
   },
   escape(str) {
     return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -6009,7 +6099,8 @@ const Pages = {
 
     const complete   = todayJobs.filter(s => s.status === 'complete').length;
     const inprogress = todayJobs.filter(s => s.status === 'inprogress').length;
-    const pending    = todayJobs.filter(s => !s.status || s.status === 'pending').length;
+    const pending    = todayJobs.filter(s => (!s.status || s.status === 'pending')).length;
+    const skippedCt  = todayJobs.filter(s => s.status === 'skipped').length;
 
     return `
     <div class="page-header">
@@ -6108,7 +6199,7 @@ const Pages = {
             ${todayJobs.slice(0,6).map(s => {
               const job = Jobs.getById(s.jobId);
               if (!job) return '';
-              const statusIcon = { complete:'✅', inprogress:'🔄', pending:'⬜' }[s.status || 'pending'];
+              const statusIcon = { complete:'✅', inprogress:'🔄', skipped:'⏭', pending:'⬜' }[s.status || 'pending'];
               return `
               <div class="job-card" onclick="Scheduler.viewScheduled('${s.id}')">
                 <div class="job-priority-bar p-${Utils.priorityClass(job.priority)}"></div>
@@ -6189,7 +6280,7 @@ const Pages = {
             const job = Jobs.getById(s.jobId);
             if (!job) return '';
             const isOv = s.date < today && s.status !== 'complete';
-            const statusIcon = { complete:'✅', inprogress:'🔄', pending:'⬜' }[s.status||'pending'];
+            const statusIcon = { complete:'✅', inprogress:'🔄', skipped:'⏭', pending:'⬜' }[s.status||'pending'];
             return `
             <div class="job-card ${isOv?'overdue':''}" onclick="Modal.close();Scheduler.viewScheduled('${s.id}')">
               <div class="job-priority-bar p-${Utils.priorityClass(s.priority||job.priority)}"></div>
@@ -6285,8 +6376,9 @@ const Pages = {
             if (!job) return '';
             const isOv  = s.date < today && s.status !== 'complete';
             const isDone = s.status === 'complete';
-            const cls = isDone ? 'complete' : (isOv ? Utils.priorityClass(job.priority)+' overdue' : Utils.priorityClass(s.priority||job.priority));
-            const prefix = isDone ? '✓ ' : (s.status==='inprogress' ? '⟳ ' : '');
+            const isSkip = s.status === 'skipped';
+            const cls = isSkip ? 'skipped' : isDone ? 'complete' : (isOv ? Utils.priorityClass(job.priority)+' overdue' : Utils.priorityClass(s.priority||job.priority));
+            const prefix = isSkip ? '⏭ ' : isDone ? '✓ ' : (s.status==='inprogress' ? '⟳ ' : '');
             return `<div class="sched-job-chip ${cls}"
               onclick="event.stopPropagation();Scheduler.viewScheduled('${s.id}')"
               title="${Utils.escape(job.name)}">${prefix}${Utils.escape(job.name)}</div>`;
@@ -6534,6 +6626,7 @@ const Pages = {
               </div>
             </div>
             <div class="job-actions">
+              ${job.autoSchedule ? '<span class="freq-badge" style="color:var(--gold);border-color:var(--gold2)" title="Auto-planned">⚡ Auto</span>' : ''}
               <span class="freq-badge">${Utils.freqLabel(job.frequency)}</span>
               <span class="priority-badge ${Utils.priorityClass(job.priority)}">${Utils.priorityLabel(job.priority)}</span>
               ${canEdit ? `<button class="btn btn-ghost btn-icon btn-sm" title="Edit" onclick="event.stopPropagation();JobEditor.open('${job.id}')">✏️</button>` : ''}
@@ -6683,8 +6776,8 @@ const JobEditor = {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Frequency</label>
-          <select id="je-freq">
-            ${['daily','weekly','monthly','annual','adhoc'].map(f =>
+          <select id="je-freq" onchange="JobEditor._renderRecur(this.value)">
+            ${['daily','weekly','monthly','annual','interval','adhoc'].map(f =>
               `<option value="${f}" ${j.frequency===f?'selected':''}>${Utils.freqLabel(f)}</option>`).join('')}
           </select>
         </div>
@@ -6696,6 +6789,24 @@ const JobEditor = {
           </select>
         </div>
       </div>
+
+      <div class="form-group" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem">
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer">
+          <input type="checkbox" id="je-auto" ${j.autoSchedule?'checked':''} style="width:18px;height:18px;accent-color:var(--accent)">
+          <span>⚡ <strong>Auto-Plan this job</strong> — appears on the planner by itself, pre-assigned</span>
+        </label>
+        <div id="je-recur-area" style="margin-top:0.6rem"></div>
+        <div class="form-group" style="margin-top:0.6rem">
+          <label class="form-label">Default Assignee</label>
+          <select id="je-default-assignee">
+            <option value="">— Unassigned —</option>
+            ${Staff.getAll().filter(m => m.status !== 'inactive').map(m =>
+              `<option value="${m.id}" ${j.defaultAssigneeId===m.id?'selected':''}>${Utils.escape(m.name)}</option>`).join('')}
+          </select>
+          <span class="form-hint">Auto-planned instances go to this person (unless they're on leave that day).</span>
+        </div>
+      </div>
+
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Estimated Hours</label>
@@ -6761,7 +6872,51 @@ const JobEditor = {
     this._catTags = [...catSelected];
     this._eqTags  = [...eqSelected];
     this._stockTags = [...(j.stock || [])];
-    setTimeout(() => JobEditor._renderStockTags(), 60);
+    this._editingJob = j;
+    setTimeout(() => { JobEditor._renderStockTags(); JobEditor._renderRecur(j.frequency); }, 60);
+  },
+
+  // Recurrence detail inputs — change with the chosen frequency
+  _renderRecur(freq) {
+    const el = document.getElementById('je-recur-area');
+    if (!el) return;
+    const j = this._editingJob || {};
+    const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const days = j.recurDays || (freq === 'daily' ? [...DOW] : ['Mon']);
+    if (freq === 'daily' || freq === 'weekly') {
+      el.innerHTML = `
+      <label class="form-label">Runs On</label>
+      <div style="display:flex;gap:0.55rem;flex-wrap:wrap;margin-top:0.25rem">
+        ${DOW.map(d => `
+        <label style="display:flex;align-items:center;gap:0.25rem;font-size:0.78rem;cursor:pointer">
+          <input type="checkbox" class="je-recur-day" value="${d}" ${days.includes(d)?'checked':''}> ${d}
+        </label>`).join('')}
+      </div>`;
+    } else if (freq === 'monthly') {
+      el.innerHTML = `
+      <label class="form-label">Day of Month</label>
+      <input type="number" id="je-recur-dom" min="1" max="31" value="${j.recurDayOfMonth || 1}" style="max-width:100px">
+      <span class="form-hint">31 fires on the last day of shorter months.</span>`;
+    } else if (freq === 'annual') {
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      el.innerHTML = `
+      <label class="form-label">Runs Every Year On</label>
+      <div style="display:flex;gap:0.4rem">
+        <select id="je-recur-month" style="flex:2">${months.map((m,i) => `<option value="${i+1}" ${(j.recurMonth||1)==i+1?'selected':''}>${m}</option>`).join('')}</select>
+        <input type="number" id="je-recur-day" min="1" max="31" value="${j.recurDay || 1}" style="flex:1">
+      </div>`;
+    } else if (freq === 'interval') {
+      el.innerHTML = `
+      <div style="display:flex;gap:0.4rem;align-items:end">
+        <div class="form-group" style="flex:1"><label class="form-label">Every N Weeks</label>
+          <input type="number" id="je-recur-weeks" min="1" max="52" value="${j.intervalWeeks || 4}"></div>
+        <div class="form-group" style="flex:2"><label class="form-label">Starting From</label>
+          <input type="date" id="je-recur-anchor" value="${j.intervalAnchor || Utils.dateStr(new Date())}"></div>
+      </div>
+      <span class="form-hint">For the every-so-often jobs — verti-cutting, solid tining, edging cycles.</span>`;
+    } else {
+      el.innerHTML = `<span class="form-hint">Ad hoc jobs are scheduled manually — auto-plan doesn't apply.</span>`;
+    }
   },
 
   _renderStockTags() {
@@ -6852,6 +7007,15 @@ const JobEditor = {
       notes:      document.getElementById('je-notes').value.trim(),
       chemicals: existingId ? (Jobs.getById(existingId)?.chemicals || []) : [],
       stock:     [...(this._stockTags || [])],
+      // Auto-Planner fields
+      autoSchedule:      !!document.getElementById('je-auto')?.checked,
+      defaultAssigneeId: document.getElementById('je-default-assignee')?.value || '',
+      recurDays:         [...document.querySelectorAll('.je-recur-day:checked')].map(c => c.value),
+      recurDayOfMonth:   parseInt(document.getElementById('je-recur-dom')?.value) || undefined,
+      recurMonth:        parseInt(document.getElementById('je-recur-month')?.value) || undefined,
+      recurDay:          parseInt(document.getElementById('je-recur-day')?.value) || undefined,
+      intervalWeeks:     parseInt(document.getElementById('je-recur-weeks')?.value) || undefined,
+      intervalAnchor:    document.getElementById('je-recur-anchor')?.value || undefined,
       ppe:       existingId ? (Jobs.getById(existingId)?.ppe || []) : [],
       updated:   Date.now(),
       created:   existingId ? (Jobs.getById(existingId)?.created || Date.now()) : Date.now()
@@ -6860,6 +7024,10 @@ const JobEditor = {
     Jobs.save(job);
     Modal.close();
     Toast.show(existingId ? 'Job updated' : 'Job created', 'success');
+    if (job.autoSchedule) {
+      const r = AutoScheduler.run();
+      if (r.added) Toast.show(`⚡ Auto-Planner scheduled ${r.added} upcoming instance${r.added!==1?'s':''}`, 'success', 4000);
+    }
     Pages.render(App._currentPage);
   },
 
@@ -6958,7 +7126,13 @@ const Scheduler = {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Assign To (optional)</label>
-          <input type="text" id="sched-assign" placeholder="Staff member name">
+          <select id="sched-assign">
+            <option value="">— Unassigned —</option>
+            ${Staff.getAll().filter(m => m.status !== 'inactive').map(m => {
+              const onLeave = Leave.isOnLeave(m.id, date || Utils.dateStr(new Date()));
+              return `<option value="${Utils.escape(m.name)}">${Utils.escape(m.name)}${onLeave ? ' (on leave)' : ''}</option>`;
+            }).join('')}
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">Priority Override</label>
@@ -7146,14 +7320,59 @@ const Scheduler = {
       </div>` : ''}
     </div>
     <div class="modal-footer" style="flex-wrap:wrap;gap:0.4rem">
-      ${canEdit && sched.status !== 'complete' ? `
+      ${canEdit && sched.status !== 'complete' && sched.status !== 'skipped' ? `
         <button class="btn btn-secondary btn-sm" onclick="Modal.close();Scheduler.reschedule('${schedId}')">📅 Reschedule</button>
         <button class="btn btn-secondary btn-sm" onclick="Scheduler.markStatus('${schedId}','inprogress');Modal.close()">🔄 In Progress</button>
+        <button class="btn btn-secondary btn-sm" onclick="Modal.close();Scheduler.skip('${schedId}')">⏭ Skip Today</button>
         <button class="btn btn-primary btn-sm" onclick="Modal.close();Scheduler.complete('${schedId}')">✅ Mark Complete</button>
       ` : ''}
       ${canEdit ? `<button class="btn btn-danger btn-sm" onclick="Scheduler._deleteScheduled('${schedId}')">Delete</button>` : ''}
       <button class="btn btn-ghost btn-sm" onclick="Modal.close()">Close</button>
     </div>`);
+  },
+
+  // "We don't need it today" — skipped, not deleted, so the
+  // Auto-Planner never resurrects it and the record shows why.
+  skip(schedId) {
+    const sched = Jobs.getScheduled().find(s => s.id === schedId);
+    if (!sched) return;
+    const job = Jobs.getById(sched.jobId);
+    Modal.show(`
+    <div class="modal-header">
+      <h2 class="modal-title">⏭ Skip: ${Utils.escape(job?.name || 'Job')}</h2>
+      <button class="btn btn-ghost btn-icon" onclick="Modal.close()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:0.82rem;color:var(--text2)">Skipping records that this job wasn't needed on ${Utils.formatDate(sched.date)} — it won't show as overdue and the Auto-Planner won't re-add it.</div>
+      <div class="form-group">
+        <label class="form-label">Reason (optional)</label>
+        <select id="skip-reason">
+          <option value="Not needed today">Not needed today</option>
+          <option value="Weather">Weather</option>
+          <option value="Course event / competition">Course event / competition</option>
+          <option value="Done recently — still good">Done recently — still good</option>
+          <option value="Resourcing">Resourcing</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+      <button class="btn btn-primary" onclick="Scheduler._confirmSkip('${schedId}')">Skip It</button>
+    </div>`);
+  },
+
+  _confirmSkip(schedId) {
+    const sched = Jobs.getScheduled().find(s => s.id === schedId);
+    if (!sched) return;
+    sched.status = 'skipped';
+    sched.skipReason = document.getElementById('skip-reason')?.value || 'Not needed today';
+    sched.updatedAt = Date.now();
+    sched.updatedBy = User.get().name;
+    Jobs.saveScheduled(sched);
+    Modal.close();
+    Toast.show('Skipped — won\'t show as overdue', 'success');
+    Pages.render(App._currentPage);
   },
 
   markStatus(schedId, status) {
@@ -7354,6 +7573,10 @@ const App = {
     document.getElementById('app').style.display = 'grid';
     // Load templates if first launch
     Templates.load();
+    // Auto-Planner: generate upcoming instances for auto-scheduled jobs.
+    // Idempotent — every device can run it, nothing duplicates.
+    const auto = AutoScheduler.run();
+    if (auto.added) Toast.show(`⚡ Auto-Planner scheduled ${auto.added} job${auto.added !== 1 ? 's' : ''}`, 'success', 4000);
     this.nav('dashboard');
   },
 
