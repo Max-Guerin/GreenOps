@@ -1,6 +1,6 @@
 /* GreenOps service worker — offline shell.
    Bump CACHE version whenever index.html changes so installs pick up the new build. */
-const CACHE = 'greenops-v8';
+const CACHE = 'greenops-v9';
 const SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (e) => {

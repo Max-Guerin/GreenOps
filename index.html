@@ -808,12 +808,95 @@ ul { list-style: none; }
     grid-template-rows: 56px 1fr;
   }
   #nav { display: none; }
-  #main { padding: 1rem; }
+  #main {
+    padding: 0.85rem;
+    /* keep content clear of the fixed bottom bar + iPhone home indicator */
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
   .form-row { grid-template-columns: 1fr; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .modal { max-width: 100%; margin: 0; border-radius: var(--radius2) var(--radius2) 0 0; max-height: 85vh; }
   .modal-overlay { align-items: flex-end; padding: 0; }
   #mobile-nav-bar { display: flex; }
+
+  /* ── Header: logo + icon buttons only ── */
+  #header { padding: 0 0.75rem; gap: 0.4rem; }
+  #header .logo { font-size: 1.15rem; }
+  #header .header-right { gap: 0.35rem; flex-shrink: 1; min-width: 0; }
+  #header .date-display { display: none; }
+  #header .user-badge { display: none; }
+  .hide-mobile { display: none; }
+  .hide-mobile-inline { display: none; }
+
+  /* ── Page chrome ── */
+  .page-title { font-size: 1.3rem; }
+  .page-header { gap: 0.5rem; }
+  .page-actions { width: 100%; }
+  .page-actions .btn { flex: 1; justify-content: center; }
+  .stats-row { grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 0.5rem; }
+  .stat-value { font-size: 1.4rem; }
+  .card { padding: 0.85rem; }
+
+  /* Tabs & filters scroll sideways instead of wrapping into soup */
+  .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab-btn { white-space: nowrap; flex-shrink: 0; padding: 0.55rem 0.7rem; }
+  .filter-bar { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 0.15rem; }
+  .filter-bar::-webkit-scrollbar { display: none; }
+  .filter-chip { white-space: nowrap; flex-shrink: 0; }
+
+  /* Month calendar: compact cells, day popup does the detail */
+  .month-cal-day { min-height: 58px; padding: 0.15rem; }
+  .mcd-num { font-size: 0.68rem; }
+  .mcd-add { display: none; }
+  .sched-job-chip { font-size: 0.55rem; padding: 0.12rem 0.25rem; }
+  .mcd-more { font-size: 0.55rem; }
+  .leave-strip { font-size: 0.5rem; }
+
+  /* Report/budget bars: narrower label column */
+  .bar-row { grid-template-columns: 84px 1fr 70px; gap: 0.4rem; font-size: 0.72rem; }
+  .bar-value { font-size: 0.7rem; }
+
+  /* Job cards: let actions wrap under instead of crushing */
+  .job-card { grid-template-columns: 4px 1fr; }
+  .job-actions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; margin-top: 0.35rem; }
+
+  .wb-clock { font-size: 1.7rem; }
+  .modal-footer { flex-wrap: wrap; }
+  .modal-footer .btn { flex: 1; justify-content: center; }
+}
+
+/* ── "More" menu grid (mobile nav overflow) ── */
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+.more-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.75rem 0.25rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: var(--trans);
+  position: relative;
+  font-family: var(--font-mono);
+  color: var(--text2);
+}
+.more-item:hover { border-color: var(--border2); color: var(--text); }
+.more-item .m-icon { font-size: 1.3rem; }
+.more-item .m-label { font-size: 0.62rem; text-align: center; line-height: 1.2; }
+.more-item .m-badge {
+  position: absolute; top: 4px; right: 4px;
+  background: var(--p-critical); color: #fff;
+  border-radius: 10px; font-size: 0.6rem;
+  min-width: 16px; height: 16px; line-height: 16px; text-align: center;
+  padding: 0 0.25rem;
 }
 #mobile-nav-bar {
   display: none;
@@ -822,7 +905,8 @@ ul { list-style: none; }
   background: var(--bg2);
   border-top: 1px solid var(--border);
   z-index: 500;
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .mobile-nav-item {
   flex: 1;
@@ -1466,8 +1550,8 @@ body.tv-mode .wb-clock { font-size: 3.5rem; }
     <div class="logo">Green<span>Ops</span></div>
     <div class="header-right">
       <div class="date-display" id="header-date"></div>
-      <button class="btn btn-ghost btn-sm" id="sync-btn" onclick="Sync.manual()" style="display:none" title="Sync with cloud">⟳ Sync</button>
-      <button class="btn btn-ghost btn-sm" onclick="Backup.open()" title="Data &amp; Backup">⛃ Data</button>
+      <button class="btn btn-ghost btn-sm" id="sync-btn" onclick="Sync.manual()" style="display:none" title="Sync with cloud">⟳<span class="hide-mobile-inline"> Sync</span></button>
+      <button class="btn btn-ghost btn-sm" onclick="Backup.open()" title="Data &amp; Backup">⛃<span class="hide-mobile-inline"> Data</span></button>
       <div class="user-badge">
         <span class="role-dot"></span>
         <span id="header-user">Loading...</span>
@@ -1575,11 +1659,14 @@ body.tv-mode .wb-clock { font-size: 3.5rem; }
   <div class="mobile-nav-item" data-page="scheduler" onclick="App.nav('scheduler')">
     <span class="m-icon">📅</span>Planner
   </div>
-  <div class="mobile-nav-item" data-page="jobs" onclick="App.nav('jobs')">
-    <span class="m-icon">📋</span>Jobs
+  <div class="mobile-nav-item" data-page="whiteboard" onclick="App.nav('whiteboard')">
+    <span class="m-icon">📺</span>Board
   </div>
-  <div class="mobile-nav-item" data-page="incomplete" onclick="App.nav('incomplete')">
-    <span class="m-icon">⚠️</span>Incomplete
+  <div class="mobile-nav-item" data-page="coursemap" onclick="App.nav('coursemap')">
+    <span class="m-icon">🗺️</span>Map
+  </div>
+  <div class="mobile-nav-item" data-page="_more" onclick="App.more()">
+    <span class="m-icon">☰</span>More
   </div>
 </div>
 
@@ -1837,7 +1924,7 @@ const Tombstones = {
    works with cloud disabled, unreachable, or unconfigured. */
 const GO_CLOUD = {
   url: 'https://wbqbmcgfrrsefnwrorxp.supabase.co',
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndicWJtY2dmcnJzZWZud3JvcnhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1NzQ3OTksImV4cCI6MjA5OTE1MDc5OX0.VlYBzO3twfsvGVeYuDLg3Pwq7SAu8Ws5jcvodBd-gYM'   // Supabase Dashboard → Settings → API → anon public
+  anonKey: 'PASTE_ANON_KEY_HERE'   // Supabase Dashboard → Settings → API → anon public
 };
 
 const Cloud = {
@@ -1845,7 +1932,10 @@ const Cloud = {
   _loading: null,
 
   configured() {
-    return GO_CLOUD.anonKey && GO_CLOUD.anonKey !== 'PASTE_ANON_KEY_HERE';
+    // A real Supabase anon key is a JWT and always starts with 'eyJ'.
+    // Checking the shape (not a placeholder string) means editing mistakes
+    // can't break this test — the lesson of deployment day.
+    return typeof GO_CLOUD.anonKey === 'string' && GO_CLOUD.anonKey.startsWith('eyJ');
   },
 
   // Lazy-load supabase-js; resolves null when offline/unconfigured/test env
@@ -1904,17 +1994,21 @@ const Cloud = {
     DB.setObj('cloud', {});
   },
 
-  // Create org + membership row; returns org id
+  // Create org + membership row; returns org id.
+  // Org id is generated client-side so no SELECT round-trip is needed —
+  // which lets the orgs table run a members-only select policy.
   async createOrg(name) {
     const c = await this.client();
     if (!c) throw new Error('Cloud unavailable');
-    const { data: org, error } = await c.from('orgs').insert({ name }).select().single();
+    const orgId = (crypto.randomUUID ? crypto.randomUUID() :
+      'org-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10));
+    const { error } = await c.from('orgs').insert({ id: orgId, name });
     if (error) throw error;
     const { data: userData } = await c.auth.getUser();
     const uid = userData?.user?.id;
-    const { error: mErr } = await c.from('org_members').insert({ org_id: org.id, user_id: uid, role: 'manager' });
+    const { error: mErr } = await c.from('org_members').insert({ org_id: orgId, user_id: uid, role: 'manager' });
     if (mErr) throw mErr;
-    return org.id;
+    return orgId;
   },
 
   // First org this user belongs to (single-course accounts for now)
@@ -2095,9 +2189,10 @@ const Sync = {
     const btn = document.getElementById('sync-btn');
     if (!btn) return;
     btn.classList.remove('syncing', 'sync-error');
-    if (state === 'syncing') { btn.classList.add('syncing');    btn.textContent = '⟳ Syncing…'; }
-    if (state === 'ok')      {                                   btn.textContent = '⟳ Sync';    }
-    if (state === 'error')   { btn.classList.add('sync-error');  btn.textContent = '⟳ Retry';   }
+    const label = (t) => `⟳<span class="hide-mobile-inline"> ${t}</span>`;
+    if (state === 'syncing') { btn.classList.add('syncing');    btn.innerHTML = label('Syncing…'); }
+    if (state === 'ok')      {                                   btn.innerHTML = label('Sync');     }
+    if (state === 'error')   { btn.classList.add('sync-error');  btn.innerHTML = label('Retry');    }
   },
 
   showButton() {
@@ -2134,8 +2229,13 @@ const AuthUI = {
     try {
       const { user } = await Cloud.signIn(email, pw);
       const member   = await Cloud.myOrg();
-      if (!member) { this._msg('Account has no course — ask your manager for an invite'); return; }
       const name = user?.user_metadata?.name || email.split('@')[0];
+      if (!member) {
+        // Half-completed signup or invite not yet processed —
+        // self-heal instead of dead-ending at "ask your manager"
+        this._offerCreateCourse(name, email);
+        return;
+      }
       DB.setObj('cloud', { orgId: member.org_id, role: member.role, email });
       User.set(name, member.role, User.get().course || 'My Course');
       App._launch();
@@ -2143,6 +2243,46 @@ const AuthUI = {
       Sync.silent();                            // pull the course data onto this device
     } catch (e) {
       this._msg(e.message || 'Sign in failed');
+    }
+  },
+
+  _offerCreateCourse(name, email) {
+    Modal.show(`
+    <div class="modal-header">
+      <h2 class="modal-title">No course on this account</h2>
+      <button class="btn btn-ghost btn-icon" onclick="Modal.close()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:0.83rem;color:var(--text2);line-height:1.7">
+        You're signed in, but this account isn't linked to a course yet.
+        If you're joining an existing course, ask your manager for an invite.
+        If this is <em>your</em> course, create it now:
+      </div>
+      <div class="form-group">
+        <label class="form-label">Course Name</label>
+        <input type="text" id="heal-course" placeholder="e.g. Pines Golf Club">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+      <button class="btn btn-primary" onclick="AuthUI._healCreateCourse('${Utils.escape(name)}','${Utils.escape(email)}')">Create Course</button>
+    </div>`);
+  },
+
+  async _healCreateCourse(name, email) {
+    const course = document.getElementById('heal-course')?.value.trim();
+    if (!course) { Toast.show('Enter the course name', 'error'); return; }
+    try {
+      const orgId = await Cloud.createOrg(course);
+      User.set(name, 'manager', course);
+      Templates.load();                         // fresh org gets the job library
+      DB.setObj('cloud', { orgId, role: 'manager', email });
+      Modal.closeAll();
+      App._launch();
+      Sync.showButton();
+      Sync.silent();
+    } catch (e) {
+      Toast.show(e.message || 'Could not create course', 'error');
     }
   },
 
@@ -7219,6 +7359,7 @@ const App = {
 
   nav(page) {
     this._currentPage = page;
+    Modal.closeAll();
     // Update nav active state
     document.querySelectorAll('.nav-item[data-page], .mobile-nav-item[data-page]').forEach(el => {
       el.classList.toggle('active', el.dataset.page === page);
@@ -7227,6 +7368,43 @@ const App = {
     this._updateBadges();
     // Scroll to top
     document.getElementById('main').scrollTop = 0;
+  },
+
+  // Mobile "More" sheet — every destination, with live badges
+  more() {
+    const badge = (n) => n > 0 ? `<span class="m-badge">${n}</span>` : '';
+    const items = [
+      ['jobs',       '📋', 'Jobs',        0],
+      ['incomplete', '⚠️', 'Incomplete',  Jobs.getIncomplete().length],
+      ['staff',      '👥', 'Staff',       0],
+      ['equipment',  '🚜', 'Equipment',   Equipment.getAll().filter(e => { const s = Equipment.serviceStatus(e); return s.overdue || s.due; }).length],
+      ['faults',     '🔧', 'Faults',      Faults.getOpen().length],
+      ['irrigation', '💧', 'Irrigation',  IrrigationData.getOpenFaults().length],
+      ['chemicals',  '🧪', 'Chemicals',   Applications.activeLocks().length],
+      ['safety',     '🛡️', 'Safety',      Incidents.recent(7).length],
+      ['conditions', '📈', 'Conditions',  0],
+      ['pests',      '🐛', 'Pest/Disease', Pests.spreadAlerts().length],
+      ['reports',    '📊', 'Reports',     0],
+      ['budget',     '💰', 'Budget',      0],
+      ['stock',      '📦', 'Stock',       Stock.lowItems().length],
+      ['resources',  '📚', 'Resources',   0],
+      ['weather',    '🌤️', 'Weather',     Weather.activeAlerts().length],
+    ];
+    Modal.show(`
+    <div class="modal-header">
+      <h2 class="modal-title">All Pages</h2>
+      <button class="btn btn-ghost btn-icon" onclick="Modal.close()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="more-grid">
+        ${items.map(([page, icon, label, count]) => `
+        <div class="more-item" onclick="App.nav('${page}')">
+          ${badge(count)}
+          <span class="m-icon">${icon}</span>
+          <span class="m-label">${label}</span>
+        </div>`).join('')}
+      </div>
+    </div>`);
   },
 
   _updateBadges() {
